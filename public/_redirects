@@ -1,0 +1,2 @@
+/api/render /.netlify/functions/render 200
+/api/render/* /.netlify/functions/render-status 200

@@ -130,88 +130,78 @@ export default function App() {
 
   const imgRef = useRef(null);
   const canPreview = Boolean(selfieUrl);
-
-  async function sendToMyPhone() {
-    if (!selfieFile) {
-      setRenderError("Add a selfie first.");
-      return;
-    }
-
-    setRenderError(null);
-    setRendering(true);
-
-    try {
-      // 1) Create render job
-      const fd = new FormData();
-      fd.append("image", selfieFile);
-      fd.append("styleId", selectedStyle.id);
-      fd.append("format", "jpg");
-
-      const createRes = await fetch(`${API_BASE}/api/render`, { method: "POST", body: fd });
-      if (!createRes.ok) throw new Error(`Render request failed (${createRes.status}).`);
-
-      const createData = await createRes.json();
-      const jobId = createData.jobId;
-      if (!jobId) throw new Error("No jobId returned.");
-
-      // 2) Poll status
-      const started = Date.now();
-      const TIMEOUT_MS = 60_000;
-      let resultUrl = null;
-
-      while (Date.now() - started < TIMEOUT_MS) {
-        await new Promise((r) => setTimeout(r, 900));
-        const statusRes = await fetch(`${API_BASE}/api/render/${jobId}`);
-        if (!statusRes.ok) throw new Error(`Status check failed (${statusRes.status}).`);
-
-        const s = await statusRes.json();
-        if (s.status === "done" && s.resultUrl) {
-          resultUrl = s.resultUrl;
-          break;
-        }
-        if (s.status === "failed") throw new Error(s.error || "Render failed.");
-      }
-
-      if (!resultUrl) throw new Error("Render timed out. Try again.");
-
-      // 3) Download finished JPG and share
-      const imgRes = await fetch(resultUrl);
-      if (!imgRes.ok) throw new Error("Could not download finished image.");
-      const blob = await imgRes.blob();
-
-      const file = new File([blob], `wediddat-preview-${selectedStyle.id}.jpg`, { type: "image/jpeg" });
-
-      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-        try {
-          await navigator.share({
-            title: "We Did Dat Preview",
-            text: `We Did Dat Barbershop • ${selectedStyle.name}`,
-            files: [file],
-          });
-
-          // Privacy: auto-delete selfie after export/share
-          setSelfieFile(null);
-          return;
-        } catch {
-          // user cancelled -> fall through to download
-        }
-      }
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = file.name;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      // Privacy: auto-delete selfie after export/download
-      setSelfieFile(null);
-    } catch (e) {
-      setRenderError(e?.message || "Something went wrong.");
-    } finally {
-      setRendering(false);
-    }
+async function sendToMyPhone() {
+  if (!imgRef.current || !selfieUrl) {
+    setRenderError("Add a selfie first.");
+    return;
   }
+
+  setRenderError(null);
+
+  const W = 1080;
+  const H = 1350;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const baseImg = imgRef.current;
+  const overlayImg = overlayRef.current;
+
+  // Draw selfie (cover)
+  const drawCover = (img, w, h) => {
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    const s = Math.max(w / iw, h / ih);
+    const nw = iw * s;
+    const nh = ih * s;
+    ctx.drawImage(img, (w - nw) / 2, (h - nh) / 2, nw, nh);
+  };
+
+  if (!baseImg.complete) {
+    await new Promise((r) => (baseImg.onload = () => r(null)));
+  }
+  drawCover(baseImg, W, H);
+
+  // Draw haircut overlay
+  if (overlayImg) {
+    if (!overlayImg.complete) {
+      await new Promise((r) => (overlayImg.onload = () => r(null)));
+    }
+
+    ctx.globalAlpha = opacity;
+
+    const centerX = W / 2 + offsetX;
+    const centerY = H / 2 + offsetY;
+
+    const ow = overlayImg.naturalWidth || overlayImg.width;
+    const oh = overlayImg.naturalHeight || overlayImg.height;
+
+    const drawW = ow * scale;
+    const drawH = oh * scale;
+
+    ctx.drawImage(
+      overlayImg,
+      centerX - drawW / 2,
+      centerY - drawH / 2,
+      drawW,
+      drawH
+    );
+
+    ctx.globalAlpha = 1;
+  }
+
+  // Brand stamp
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(24, 24, 420, 52);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 24px system-ui, -apple-system, Segoe UI, Roboto";
+  ctx.fillText("We Did Dat Barbershop", 42, 58);
+
+  //
+
+
 
   const bg = {
     minHeight: "100vh",
